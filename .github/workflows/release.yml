@@ -1,0 +1,74 @@
+name: Release builds
+
+# Push a tag like v0.1.0 (or run manually) to export Linux and macOS builds
+# and publish them on the GitHub Releases page.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: "4.3"
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot ${{ env.GODOT_VERSION }} and export templates
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable"
+          wget -q "$base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip" -O godot.zip
+          unzip -q godot.zip
+          mv "Godot_v${GODOT_VERSION}-stable_linux.x86_64" /usr/local/bin/godot
+          wget -q "$base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz" -O templates.tpz
+          tdir="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$tdir"
+          unzip -q -j templates.tpz templates/linux_release.x86_64 templates/linux_debug.x86_64 templates/macos.zip templates/version.txt -d "$tdir"
+          rm templates.tpz godot.zip
+
+      - name: Import project
+        run: godot --headless --path . --import || true
+
+      - name: Run automated playthrough
+        run: timeout 600 godot --headless --path . res://scenes/game.tscn -- --autotest
+
+      - name: Export Linux and macOS
+        run: |
+          set -euo pipefail
+          mkdir -p build/linux build/macos dist
+          godot --headless --path . --export-release "Linux" build/linux/ASoCalledPhantom.x86_64
+          godot --headless --path . --export-release "macOS" build/macos/ASoCalledPhantom.zip
+          test -s build/linux/ASoCalledPhantom.x86_64
+          test -s build/macos/ASoCalledPhantom.zip
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          chmod +x build/linux/ASoCalledPhantom.x86_64
+          cp README.md build/linux/
+          tar -C build/linux -czf "dist/ASoCalledPhantom-${tag}-linux-x86_64.tar.gz" .
+          cp build/macos/ASoCalledPhantom.zip "dist/ASoCalledPhantom-${tag}-macos-universal.zip"
+          ls -la dist
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* \
+              --title "A So Called Phantom ${tag}" \
+              --notes-file .github/release_notes.md \
+              --target "${{ github.sha }}" \
+              --prerelease
+          fi

@@ -21,7 +21,14 @@ ghost form however you like.
 > belong to their owners. You would need a licence to publish it, or you
 > could re-theme it as an original ghost hero.
 
-## Running it
+## Download
+
+Ready-to-play **Linux** and **macOS** builds are on the [Releases page](https://github.com/NyteRyzer/dpgame/releases).
+On macOS the app isn't notarized: right-click the app, choose **Open**, then **Open** again on first launch.
+
+New releases are built automatically by `.github/workflows/release.yml` when a `v*` tag is pushed.
+
+## Running from source
 
 1. Install **Godot 4.3 or newer** (standard build, no .NET needed) from <https://godotengine.org>.
 2. In the Godot Project Manager click **Import**, then pick this folder's `project.godot`.
