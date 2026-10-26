@@ -15,6 +15,7 @@ var radius := 0.25
 var color := Color(0.3, 1.0, 0.5)
 var drop := 0.0
 var shooter: Node = null
+var splash := 0.0          # >0: area damage radius on impact
 var _dead := false
 var _exclude: Array[RID] = []
 
@@ -105,6 +106,9 @@ func _on_body(body: Node) -> void:
 		return
 	if body.has_method("take_damage"):
 		body.take_damage(damage, global_position, effect)
+		if team == "player" and body.is_in_group("enemies"):
+			var killed: bool = body.has_method("is_alive") and not body.is_alive()
+			get_tree().call_group("hud", "hit_marker", killed)
 	elif effect == "ice":
 		_spawn_ice_crystal()
 	_impact()
@@ -132,6 +136,12 @@ func _impact() -> void:
 				n.take_damage(damage * 0.5, global_position, "")
 	else:
 		B.burst(world, global_position, color if effect == "" else Color(0.8, 0.9, 1.0), 14, 5.0, 0.18)
+	if splash > 0.0:
+		B.shockwave(world, global_position, color, splash, 0.4)
+		B.burst(world, global_position, color, 40, splash * 3.0, 0.3)
+		for n in get_tree().get_nodes_in_group("enemies") + get_tree().get_nodes_in_group("destructibles"):
+			if n is Node3D and n.is_inside_tree() and n.has_method("take_damage") and n.global_position.distance_to(global_position) < splash:
+				n.take_damage(damage * 0.5, global_position, "")
 	queue_free()
 
 

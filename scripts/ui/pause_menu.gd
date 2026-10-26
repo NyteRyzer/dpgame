@@ -170,6 +170,7 @@ func _settings() -> void:
 	_slider("Master volume", "master_volume", 0.0, 1.0, 0.05)
 	_check("Invert camera Y", "invert_y")
 	_check("Cinematic transformation when standing still", "cinematic_transform")
+	_check("Aim assist (bullet magnetism near the crosshair)", "aim_assist")
 
 
 func _slider(text: String, key: String, lo: float, hi: float, step: float) -> void:
@@ -212,15 +213,18 @@ func _controls() -> void:
 		["Shift", "Sprint / flight boost"],
 		["Alt", "Aerial dodge"],
 		["G", "Transform (Go Ghost / Go Human)"],
-		["Left mouse / 1", "Ecto blast (human: Fenton wrist ray)"],
-		["Right mouse", "Aim (over the shoulder)"],
+		["Left mouse / 1", "Fire equipped weapon (human: Fenton wrist ray)"],
+		["Right mouse", "Aim over the shoulder (slower, more precise, homing shots)"],
+		["Mouse wheel", "Camera distance; while aiming: precision zoom"],
+		["X", "Swap aiming shoulder"],
+		["Tab (hold)", "Weapon & power wheel (time slows)"],
 		["2 / 3 / 4", "Ghost shield / Intangibility / Cryokinesis"],
 		["Q / V", "Ghost sense / Invisibility"],
 		["Z / T / F / R", "Ecto construct / Overshadow / Duplicate / Ghostly Wail"],
 		["B", "Ghost tail (while flying)"],
 		["E (hold)", "Talk, interact, capture with the Fenton Thermos"],
 		["M", "Map"],
-		["Esc / Tab", "Fenton OS menu"],
+		["Esc / P", "Fenton OS menu"],
 	]
 	for r in rows:
 		var h := HBoxContainer.new()

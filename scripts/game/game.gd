@@ -60,6 +60,9 @@ var _tick := 0.0
 var _last_hour := -1
 var _students: Array = []
 var _respawning := false
+var _sensed_ids := {}
+var _sense_react_cd := 0.0
+var _sense_scan := 0.0
 
 
 func _ready() -> void:
@@ -286,6 +289,10 @@ func input_blocked() -> bool:
 	return not _dialog.is_empty() or pause_menu.visible
 
 
+func wheel_open() -> bool:
+	return hud != null and hud.wheel.visible
+
+
 func sense_active() -> bool:
 	return Time.get_ticks_msec() / 1000.0 < _sense_until
 
@@ -378,6 +385,7 @@ func on_player_died() -> void:
 	if _respawning:
 		return
 	_respawning = true
+	hud.wheel.close(false)
 	hud.show_banner("KNOCKED OUT", "Waking up at Fenton Works...", 3.0)
 	var lost := GameState.thermos.size()
 	GameState.thermos.clear()
@@ -446,6 +454,7 @@ func travel(target: String, spot: String) -> void:
 
 
 func _do_travel(target: String, spot: String) -> void:
+	hud.wheel.close(false)
 	var to_root: Node3D = amity if target == "amity" else ghost_zone
 	var from_root: Node3D = realm_root()
 	player.end_overshadow()
@@ -557,6 +566,47 @@ func _process(delta: float) -> void:
 				GameState.discover(l["name"])
 	_find_interactable()
 	_bounds()
+	_update_wheel()
+	_ghost_sense_scan(delta)
+
+
+func _update_wheel() -> void:
+	var held := Input.is_action_pressed("wheel")
+	if held and not wheel_open() and not input_blocked() and not player.dead and not _respawning:
+		hud.wheel.open(player)
+	elif not held and wheel_open():
+		hud.wheel.close(true)
+
+
+## Danny's ghost sense: when a ghost appears close by, he shivers, a wisp of
+## blue breath escapes, and the HUD points toward it. Works in either form.
+func _ghost_sense_scan(delta: float) -> void:
+	_sense_react_cd = maxf(0.0, _sense_react_cd - delta)
+	_sense_scan -= delta
+	if _sense_scan > 0.0 or player.dead:
+		return
+	_sense_scan = 0.25
+	var radius := 55.0 if not GameState.has_tech("scanner") else 85.0
+	var newest: Node3D = null
+	var alive := {}
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if not e.is_inside_tree() or e.kind == "giw" or e.kind == "hacked":
+			continue
+		var id: int = e.get_instance_id()
+		alive[id] = true
+		if _sensed_ids.has(id):
+			continue
+		if e.global_position.distance_to(player.global_position) < radius:
+			_sensed_ids[id] = true
+			newest = e
+	for id in _sensed_ids.keys():
+		if not alive.has(id):
+			_sensed_ids.erase(id)
+	if newest and _sense_react_cd <= 0.0:
+		_sense_react_cd = 7.0
+		player.ghost_sense_react()
+		hud.ghost_sense_alert(newest.global_position + Vector3(0, 1.2, 0))
+		_sense_until = maxf(_sense_until, Time.get_ticks_msec() / 1000.0 + 3.0)
 
 
 func _find_interactable() -> void:
@@ -596,6 +646,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("pause"):
 		if not _dialog.is_empty():
 			return
+		hud.wheel.close(false)
 		pause_menu.open("story")
 		get_viewport().set_input_as_handled()
 		return

@@ -5,6 +5,7 @@ extends CanvasLayer
 
 const UI := preload("res://scripts/ui/ui_theme.gd")
 const Minimap := preload("res://scripts/ui/minimap.gd")
+const WeaponWheel := preload("res://scripts/ui/weapon_wheel.gd")
 
 const SLOTS := [
 	["fire", "1", "Blast", "blast"],
@@ -56,6 +57,13 @@ var overlay: Control
 var minimap: Control
 var big_map: Control
 var crosshair: Label
+var wheel: Control
+var weapon_label: Label
+var _hit_t := 0.0
+var _hit_kill := false
+var _sense_t := 0.0
+var _sense_pos := Vector3.ZERO
+var _sense_label: Label
 var slots := {}
 var _slot_on: StyleBoxFlat
 var _slot_off: StyleBoxFlat
@@ -66,6 +74,7 @@ var _t := 0.0
 
 func _ready() -> void:
 	layer = 5
+	add_to_group("hud")
 	_slot_on = UI.panel(UI.GREEN, Color(0.1, 0.3, 0.18, 0.92), 6)
 	_slot_off = UI.panel(UI.GREEN_DIM, UI.PANEL, 6)
 	root = Control.new()
@@ -92,6 +101,9 @@ func _ready() -> void:
 	_build_bottom_center()
 	_build_bottom_right()
 	_build_center()
+
+	wheel = WeaponWheel.new()
+	root.add_child(wheel)
 
 	fade = ColorRect.new()
 	fade.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -294,13 +306,29 @@ func _build_bottom_right() -> void:
 
 
 func _build_center() -> void:
-	crosshair = UI.label("+", 30, Color(0.7, 1.0, 0.8))
+	# The reticle itself is drawn in _draw_crosshair(); this label shows zoom.
+	crosshair = UI.label("", 14, Color(0.7, 1.0, 0.8))
 	crosshair.set_anchors_preset(Control.PRESET_CENTER)
 	crosshair.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	crosshair.grow_vertical = Control.GROW_DIRECTION_BOTH
 	crosshair.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	crosshair.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	crosshair.offset_top = 34
 	root.add_child(crosshair)
+
+	weapon_label = UI.label("", 15, UI.GREEN)
+	weapon_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	weapon_label.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	weapon_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	weapon_label.offset_top = -108
+	weapon_label.offset_bottom = -88
+	root.add_child(weapon_label)
+
+	_sense_label = UI.label("", 22, Color(0.6, 0.85, 1.0))
+	_sense_label.set_anchors_preset(Control.PRESET_CENTER)
+	_sense_label.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_sense_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_sense_label.offset_top = -150
+	_sense_label.add_theme_constant_override("outline_size", 8)
+	root.add_child(_sense_label)
 
 	prompt = UI.label("", 20, Color(1, 1, 0.8))
 	prompt.set_anchors_preset(Control.PRESET_CENTER)
@@ -427,7 +455,15 @@ func _process(delta: float) -> void:
 		var mx: float = p.cooldown_max.get(cd_id, 1.0)
 		var rect: ColorRect = s["cd"]
 		rect.size.y = 64.0 * clampf(cd / maxf(mx, 0.01), 0.0, 1.0)
-	crosshair.visible = p.ghost or p.aiming
+	crosshair.text = ("ZOOM 2.4x" if p.aim_zoom == 1 else "AIM 1.35x  [wheel: zoom, X: shoulder]") if p.aiming else ""
+	var wname: String = GameState.WEAPONS[p.weapon][0] if p.ghost else "Fenton Wrist Ray"
+	weapon_label.text = "[LMB] %s    [Tab] wheel" % wname
+	_hit_t = maxf(0.0, _hit_t - delta)
+	if _sense_t > 0.0:
+		_sense_t = maxf(0.0, _sense_t - delta)
+		_sense_label.modulate.a = minf(1.0, _sense_t * 2.0)
+	else:
+		_sense_label.text = ""
 	# Interaction prompt / thermos.
 	var text := ""
 	if p.thermos_target:
@@ -469,6 +505,76 @@ func _process(delta: float) -> void:
 	overlay.queue_redraw()
 
 
+func hit_marker(killed: bool) -> void:
+	_hit_t = 0.25
+	_hit_kill = killed
+
+
+## The ghost-sense alert: blue frost at the screen edges and an arrow
+## pointing to where the ghost appeared.
+func ghost_sense_alert(world_pos: Vector3) -> void:
+	_sense_t = 2.2
+	_sense_pos = world_pos
+	_sense_label.text = "~ GHOST SENSE ~"
+
+
+func _draw_sense(vp: Vector2, cam: Camera3D) -> void:
+	if _sense_t <= 0.0:
+		return
+	var a := clampf(_sense_t / 2.2, 0.0, 1.0)
+	var pulse := 0.6 + 0.4 * sin(_t * 9.0)
+	var col := Color(0.55, 0.85, 1.0, 0.6 * a * pulse)
+	var w := 90.0
+	for i in 6:
+		var inset := i * w / 6.0
+		var c := Color(col, col.a * (1.0 - i / 6.0))
+		overlay.draw_rect(Rect2(inset, inset, vp.x - inset * 2.0, vp.y - inset * 2.0), c, false, w / 6.0)
+	# Direction arrow around the reticle.
+	var centre := vp * 0.5
+	var to := _sense_pos - cam.global_position
+	var local := cam.global_basis.inverse() * to
+	var dir := Vector2(local.x, -local.y)
+	if local.z > 0.0:
+		dir = Vector2(local.x, absf(local.y) + 0.01) if dir.length() < 0.01 else dir
+	if dir.length() < 0.01:
+		dir = Vector2(0, -1)
+	dir = dir.normalized()
+	var tip := centre + dir * 120.0
+	var side := Vector2(-dir.y, dir.x)
+	var arrow := PackedVector2Array([tip, tip - dir * 26.0 + side * 14.0, tip - dir * 18.0, tip - dir * 26.0 - side * 14.0])
+	overlay.draw_colored_polygon(arrow, Color(0.6, 0.9, 1.0, a))
+
+
+func _draw_crosshair(vp: Vector2) -> void:
+	var p: Node = game.player
+	if not (p.ghost or p.aiming) or game.wheel_open():
+		return
+	var c := vp * 0.5
+	var col := Color(1.0, 0.35, 0.3) if p.aim_on_enemy else Color(0.75, 1.0, 0.85)
+	var gap := 6.0 if p.aiming else 9.0
+	if p.weapon == "spread" and p.ghost:
+		gap = 18.0
+	var spd: float = p.velocity.length()
+	gap += clampf(spd / 50.0, 0.0, 1.0) * 6.0 if not p.aiming else 0.0
+	var ln := 8.0
+	for d in [Vector2.UP, Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT]:
+		overlay.draw_line(c + d * gap, c + d * (gap + ln), Color(0, 0, 0, 0.7), 4.0)
+		overlay.draw_line(c + d * gap, c + d * (gap + ln), col, 2.0)
+	overlay.draw_circle(c, 2.0, col)
+	if p.aiming:
+		overlay.draw_arc(c, gap + ln + 8.0, 0, TAU, 40, Color(col, 0.5), 1.5, true)
+	if p.charge > 0.0:
+		overlay.draw_arc(c, 26.0, -PI / 2.0, -PI / 2.0 + TAU * p.charge, 40, Color(0.5, 1.0, 0.7), 4.0, true)
+		if p.charge >= 1.0:
+			overlay.draw_arc(c, 31.0, 0, TAU, 40, Color(1, 1, 1, 0.5 + 0.5 * sin(_t * 20.0)), 2.0, true)
+	if _hit_t > 0.0:
+		var hc := Color(1.0, 0.3, 0.25) if _hit_kill else Color(1, 1, 1)
+		hc.a = _hit_t / 0.25
+		var s := 7.0 + (0.25 - _hit_t) * 20.0
+		for d in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
+			overlay.draw_line(c + d * s, c + d * (s + 7.0), hc, 2.5)
+
+
 func _draw_overlay() -> void:
 	if game == null or game.player == null:
 		return
@@ -476,6 +582,8 @@ func _draw_overlay() -> void:
 	if cam == null or not cam.is_inside_tree():
 		return
 	var vp := overlay.size
+	_draw_crosshair(vp)
+	_draw_sense(vp, cam)
 	var font := overlay.get_theme_default_font()
 	# Enemy health bars and ghost-sense markers.
 	var sensed: bool = game.sense_active()

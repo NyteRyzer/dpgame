@@ -87,6 +87,14 @@ const POWERS := {
 }
 const POWER_LEVELS := {"construct": 2, "overshadow": 3, "wail": 4, "duplicate": 5, "ice": 7}
 
+## Attack modes for the left mouse button, picked from the weapon wheel.
+const WEAPONS := {
+	"blast": ["Ecto Blast", "Rapid-fire ecto bolts. 3 energy each."],
+	"charge": ["Charged Ecto Beam", "Hold to charge, release for a heavy explosive blast."],
+	"spread": ["Ecto Spread", "A close-range burst of six bolts."],
+	"ice": ["Ice Shot", "Freezes ghosts solid and builds ice. Needs Cryokinesis."],
+}
+
 ## Fenton Technology path.
 const TECH := {
 	"thermos": ["Fenton Thermos", "Capture weakened ghosts (hold E)."],
@@ -114,6 +122,7 @@ var settings := {
 	"invert_y": false,
 	"cinematic_transform": true,
 	"fov": 75.0,
+	"aim_assist": true,
 	"master_volume": 0.8,
 }
 
@@ -324,8 +333,12 @@ func _setup_input() -> void:
 	_bind("construct", [KEY_Z])
 	_bind("tail", [KEY_B])
 	_bind("interact", [KEY_E], [JOY_BUTTON_X])
-	_bind("map", [KEY_M], [JOY_BUTTON_BACK])
-	_bind("pause", [KEY_ESCAPE, KEY_TAB], [JOY_BUTTON_START])
+	_bind("map", [KEY_M])
+	_bind("pause", [KEY_ESCAPE, KEY_P], [JOY_BUTTON_START])
+	_bind("wheel", [KEY_TAB], [JOY_BUTTON_BACK])
+	_bind("zoom_in", [], [], [], [MOUSE_BUTTON_WHEEL_UP])
+	_bind("zoom_out", [], [], [], [MOUSE_BUTTON_WHEEL_DOWN])
+	_bind("swap_shoulder", [KEY_X])
 
 
 func _bind(action: String, keys: Array, buttons: Array = [], axes: Array = [], mouse: Array = []) -> void:

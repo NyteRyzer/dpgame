@@ -25,7 +25,7 @@ xattr -dr com.apple.quarantine "/Applications/A So Called Phantom.app"
 ```
 
 ## Controls
-WASD move · Mouse camera · **G** go ghost · Space fly/ascend · C descend · Shift boost · LMB ecto blast · 2 shield · 3 phase · 4 ice · Q ghost sense · V invisibility · R Ghostly Wail · hold **E** to talk / capture with the Fenton Thermos · M map · Esc menu. Gamepads supported.
+WASD move · Mouse camera · **G** go ghost · Space fly/ascend · C descend · Shift boost · Alt barrel-roll dodge · LMB fire · RMB aim (mouse wheel = zoom, X = swap shoulder) · hold **Tab** for the weapon & power wheel · 2 shield · 3 phase · 4 ice · Q ghost sense · V invisibility · R Ghostly Wail · hold **E** to talk / capture with the Fenton Thermos · M map · Esc menu. Gamepads supported.
 
 ---
 *Fan-made, non-commercial prototype inspired by Danny Phantom (Nickelodeon/Paramount). Not affiliated with or endorsed by the rights holders.*

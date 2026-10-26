@@ -10,8 +10,10 @@ const Clone := preload("res://scripts/player/clone.gd")
 const WALK_SPEED := 6.0
 const SPRINT_SPEED := 10.5
 const GHOST_RUN := 9.0
-const FLY_SPEED := 19.0
-const BOOST_SPEED := 46.0
+const FLY_SPEED := 20.0
+const BOOST_SPEED := 52.0
+const AIM_FLY_SPEED := 10.0
+const CHARGE_TIME := 1.1
 const GRAVITY := 22.0
 const MAX_HEALTH := 100.0
 const MAX_ENERGY := 100.0
@@ -56,6 +58,23 @@ var aiming := false
 var thermos_target: Node3D = null
 var thermos_progress := 0.0
 var cinematic := false
+var weapon := "blast"
+var charge := 0.0
+var boosting := false
+var aim_on_enemy := false
+var aim_zoom := 0           # 0 = shoulder aim, 1 = precision zoom
+var cam_distance := 5.0     # mouse-wheel adjustable follow distance
+var shoulder := 1.0         # 1 = right shoulder, -1 = left
+var _aim_target: Node3D = null
+var _aim_cached := Vector3.ZERO
+var _bank := 0.0
+var _lean := 0.0
+var _prev_heading := 0.0
+var _boost_was := false
+var _air_time := 0.0
+var _flight_time := 0.0
+var _cam_lag := Vector3.ZERO
+var _last_vy := 0.0
 var _yaw := 0.0
 var _pitch := -0.2
 var _last_safe := Vector3.ZERO
@@ -143,11 +162,32 @@ func teleport(pos: Vector3, yaw := INF) -> void:
 
 # --- Input ---------------------------------------------------------------
 func _unhandled_input(event: InputEvent) -> void:
+	if game and game.wheel_open():
+		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		var sens: float = GameState.settings.get("mouse_sensitivity", 0.25) * 0.01
+		var sens: float = GameState.settings.get("mouse_sensitivity", 0.25) * 0.01 * _look_scale()
 		var inv := -1.0 if GameState.settings.get("invert_y", false) else 1.0
 		_yaw -= event.relative.x * sens
 		_pitch = clampf(_pitch - event.relative.y * sens * inv, -1.35, 1.1)
+	elif event.is_action_pressed("zoom_in"):
+		if aiming:
+			aim_zoom = 1
+		else:
+			cam_distance = clampf(cam_distance - 0.7, 2.2, 11.0)
+	elif event.is_action_pressed("zoom_out"):
+		if aiming:
+			aim_zoom = 0
+		else:
+			cam_distance = clampf(cam_distance + 0.7, 2.2, 11.0)
+	elif event.is_action_pressed("swap_shoulder"):
+		shoulder = -shoulder
+
+
+## Slower look while aiming makes precise shots easier.
+func _look_scale() -> float:
+	if not aiming:
+		return 1.0
+	return 0.38 if aim_zoom == 1 else 0.6
 
 
 func is_intangible() -> bool:
@@ -187,9 +227,11 @@ func _physics_process(delta: float) -> void:
 	fire_timer = maxf(0.0, fire_timer - delta)
 	aim_timer = maxf(0.0, aim_timer - delta)
 
-	var stick := Input.get_vector("look_left", "look_right", "look_up", "look_down")
-	_yaw -= stick.x * delta * 2.6
-	_pitch = clampf(_pitch - stick.y * delta * 2.0, -1.35, 1.1)
+	var stick := Vector2.ZERO
+	if not (game and game.wheel_open()):
+		stick = Input.get_vector("look_left", "look_right", "look_up", "look_down")
+	_yaw -= stick.x * delta * 2.6 * _look_scale()
+	_pitch = clampf(_pitch - stick.y * delta * 2.0 * _look_scale(), -1.35, 1.1)
 
 	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	if lock_time > 0.0 or (game and game.input_blocked()):
@@ -201,6 +243,8 @@ func _physics_process(delta: float) -> void:
 		_update_model(delta, Vector3.ZERO)
 		return
 
+	if not flying and not is_on_floor():
+		_air_time += delta
 	var move_dir := Vector3.ZERO
 	if flying:
 		move_dir = _fly(delta, input)
@@ -208,7 +252,14 @@ func _physics_process(delta: float) -> void:
 		move_dir = _ground(delta, input)
 	if not (game and game.input_blocked()):
 		_handle_powers(delta)
+	_last_vy = velocity.y
 	move_and_slide()
+	if not flying and is_on_floor() and _air_time > 0.35:
+		model.land_impact(clampf(-_last_vy / 14.0, 0.2, 1.2))
+	if is_on_floor():
+		_air_time = 0.0
+	_follow_camera(delta)
+	_update_aim()
 	_update_resources(delta)
 	_update_model(delta, move_dir)
 	_update_thermos(delta)
@@ -257,20 +308,37 @@ func _ground(delta: float, input: Vector2) -> Vector3:
 
 func _start_flight() -> void:
 	flying = true
+	_flight_time = 0.0
 	floor_snap_length = 0.0
-	velocity.y = maxf(velocity.y, 7.0)
-	B.burst(get_parent(), global_position + Vector3(0, 0.3, 0), Color(0.4, 1.0, 0.6), 16, 4.0, 0.2)
+	velocity.y = maxf(velocity.y, 9.0)
+	model.takeoff()
+	B.burst(get_parent(), global_position + Vector3(0, 0.2, 0), Color(0.4, 1.0, 0.6), 22, 5.0, 0.2)
+	var ring := B.torus(get_parent(), 0.6, 0.85, Vector3.ZERO, B.glow_unique(Color(0.5, 1.0, 0.7), 2.5, 0.7))
+	ring.global_position = global_position + Vector3(0, 0.15, 0)
+	var tw := ring.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(ring, "scale", Vector3(4, 1, 4), 0.4)
+	tw.tween_property(ring.material_override, "albedo_color:a", 0.0, 0.4)
+	tw.chain().tween_callback(ring.queue_free)
 
 
 func _land() -> void:
+	if not flying:
+		return
 	flying = false
+	boosting = false
 	floor_snap_length = 0.4
 	model.set_tail(false)
+	model.land_impact(clampf(velocity.length() / 18.0, 0.3, 1.0))
+	B.burst(get_parent(), global_position + Vector3(0, 0.1, 0), Color(0.5, 1.0, 0.7), 14, 3.0, 0.18)
 
 
+## Third-person superhero flight. Movement follows the camera (W flies where
+## you look), with momentum, a boost that builds speed, air-braking, banked
+## turns, dodge rolls, and a slow "aim hover" while aiming.
 func _fly(delta: float, input: Vector2) -> Vector3:
-	var b := Basis(Vector3.UP, _yaw) * Basis(Vector3.RIGHT, _pitch)
-	var dir := b * Vector3(input.x, 0, input.y)
+	var cam := Basis(Vector3.UP, _yaw) * Basis(Vector3.RIGHT, _pitch)
+	var dir := cam * Vector3(input.x, 0, input.y)
 	var vert := 0.0
 	if not (game and game.input_blocked()):
 		if Input.is_action_pressed("jump"):
@@ -280,39 +348,67 @@ func _fly(delta: float, input: Vector2) -> Vector3:
 	dir.y += vert
 	if dir.length() > 1.0:
 		dir = dir.normalized()
+	var moving := dir.length() > 0.1
+	_flight_time += delta
+	boosting = Input.is_action_pressed("sprint") and moving and input.y < 0.0 and not aiming and charge <= 0.0
 	var max_speed := FLY_SPEED
-	if Input.is_action_pressed("sprint"):
+	if boosting:
 		max_speed = BOOST_SPEED
+	elif aiming or charge > 0.0:
+		max_speed = AIM_FLY_SPEED
 	if model.tail_mode:
-		max_speed *= 1.4
+		max_speed *= 1.35
 	if drained > 0.0 or slow_time > 0.0:
 		max_speed *= 0.5
+	if boosting and not _boost_was:
+		_boost_burst()
+	_boost_was = boosting
 	var target := dir * max_speed
-	# Momentum: accelerate quickly, glide to a stop.
-	var rate := 3.2 if dir.length() > 0.1 else 1.6
+	var speed := velocity.length()
+	var rate: float
+	if not moving:
+		rate = 2.4                       # air brake into a hover
+	elif boosting and speed < max_speed:
+		rate = 1.3                       # boost builds up for a sense of weight
+	elif target.length() < speed:
+		rate = 2.8                       # shedding speed
+	else:
+		rate = 3.6
 	velocity = velocity.lerp(target, 1.0 - exp(-rate * delta))
-	if dir.length() < 0.1:
-		velocity.y += sin(Time.get_ticks_msec() * 0.002) * 0.02
+	if not moving:
+		velocity.y += sin(Time.get_ticks_msec() * 0.002) * 0.03
 	if Input.is_action_just_pressed("dodge") and cooldown_ready("dodge"):
-		var d := dir if dir.length() > 0.1 else -(b.z)
+		var d := dir if moving else Basis(Vector3.UP, _yaw) * Vector3(1, 0, 0)
+		var side := signf((Basis(Vector3.UP, _yaw).inverse() * d).x)
 		velocity += d.normalized() * 30.0
-		invuln = 0.35
-		_start_cd("dodge", 0.9)
+		invuln = 0.4
+		_start_cd("dodge", 0.8)
+		model.barrel_roll(-side if side != 0.0 else 1.0)
 		B.burst(get_parent(), global_position + Vector3(0, 1, 0), Color(0.6, 1.0, 0.8), 20, 6.0, 0.3)
-	if is_on_floor() and vert < 0.0:
+	# Land when touching down while descending or drifting slowly.
+	if _flight_time > 0.4 and is_on_floor() and (vert < 0.0 or (velocity.y <= 0.5 and Vector2(velocity.x, velocity.z).length() < 4.0 and not Input.is_action_pressed("jump"))):
 		_land()
 	if net_time > 0.0 or not ghost:
 		_land()
 	return Vector3(velocity.x, 0, velocity.z) if velocity.length() > 2.0 else Vector3.ZERO
 
 
+func _boost_burst() -> void:
+	shake = maxf(shake, 0.18)
+	camera.fov += 8.0
+	var back := global_position + Vector3(0, 1.0, 0) - velocity.normalized() * 1.5
+	B.shockwave(get_parent(), back, Color(0.6, 1.0, 0.8), 3.5, 0.35)
+	B.burst(get_parent(), back, Color(0.5, 1.0, 0.7), 26, 9.0, 0.22)
+
+
 # --- Powers --------------------------------------------------------------
 func _handle_powers(delta: float) -> void:
-	aiming = Input.is_action_pressed("aim")
+	aiming = Input.is_action_pressed("aim") and not (game and game.wheel_open())
+	if not aiming:
+		aim_zoom = 0
 	if Input.is_action_just_pressed("transform"):
 		toggle_ghost()
-	if Input.is_action_pressed("fire") and fire_timer <= 0.0:
-		_fire()
+	_handle_fire(delta)
 	if not ghost:
 		if Input.is_action_just_pressed("dodge") and cooldown_ready("dodge") and is_on_floor():
 			var d := Vector3(velocity.x, 0, velocity.z)
@@ -321,35 +417,74 @@ func _handle_powers(delta: float) -> void:
 			velocity += d.normalized() * 12.0
 			_start_cd("dodge", 1.0)
 		return
-	if Input.is_action_just_pressed("shield"):
-		set_shield(not shielded)
-	if Input.is_action_just_pressed("phase"):
-		set_phase(not phasing)
-	if Input.is_action_just_pressed("invisibility"):
-		set_invisible(not invisible)
-	if Input.is_action_just_pressed("ice"):
-		_ice()
-	if Input.is_action_just_pressed("sense"):
-		_sense()
-	if Input.is_action_just_pressed("wail"):
-		_wail()
-	if Input.is_action_just_pressed("duplicate"):
-		_duplicate()
-	if Input.is_action_just_pressed("construct"):
-		_construct()
-	if Input.is_action_just_pressed("overshadow"):
-		_overshadow()
-	if Input.is_action_just_pressed("tail"):
-		if not GameState.has_power("tail"):
-			pass
-		elif flying:
-			model.set_tail(not model.tail_mode)
-		else:
-			_toast("Take flight first to switch into ghost-tail form.", Color(0.8, 1, 0.9))
+	for pair in [["shield", "shield"], ["phase", "phase"], ["invisibility", "invis"], ["ice", "ice"], ["sense", "sense"], ["wail", "wail"], ["duplicate", "duplicate"], ["construct", "construct"], ["overshadow", "overshadow"], ["tail", "tail"]]:
+		if Input.is_action_just_pressed(pair[0]):
+			activate_ability(pair[1])
 	if overshadowing:
 		overshadow_time -= delta
 		if overshadow_time <= 0.0:
 			end_overshadow()
+
+
+## Used by the hotkeys and the weapon wheel.
+func activate_ability(id: String) -> void:
+	if id == "transform":
+		toggle_ghost()
+		return
+	if not ghost:
+		_toast("That power needs ghost form. Press [G] to go ghost.", Color(0.8, 1, 0.9))
+		return
+	match id:
+		"shield":
+			set_shield(not shielded)
+		"phase":
+			set_phase(not phasing)
+		"invis":
+			set_invisible(not invisible)
+		"ice":
+			_ice()
+		"sense":
+			_sense()
+		"wail":
+			_wail()
+		"duplicate":
+			_duplicate()
+		"construct":
+			_construct()
+		"overshadow":
+			_overshadow()
+		"tail":
+			if flying:
+				model.set_tail(not model.tail_mode)
+			else:
+				_toast("Take flight first to switch into ghost-tail form.", Color(0.8, 1, 0.9))
+
+
+func set_weapon(id: String) -> void:
+	if id == "ice" and not GameState.has_power("ice"):
+		_toast("Ice Shot needs Cryokinesis (train with Frostbite).", Color(0.7, 0.9, 1))
+		return
+	weapon = id
+	charge = 0.0
+	model.charge = 0.0
+
+
+func _handle_fire(delta: float) -> void:
+	var held: bool = Input.is_action_pressed("fire") and not (game and game.wheel_open())
+	var w := weapon if ghost else "ray"
+	if w == "charge":
+		if held and not phasing and overshadowing == null and energy > 0.5:
+			if charge <= 0.0:
+				charge = 0.01
+			charge = minf(1.0, charge + delta / CHARGE_TIME)
+			energy = maxf(0.0, energy - 14.0 * delta)
+			_face_camera()
+		elif charge > 0.0:
+			_release_charge()
+		model.charge = charge
+		return
+	if held and fire_timer <= 0.0:
+		_fire(w)
 
 
 func toggle_ghost() -> void:
@@ -376,11 +511,45 @@ func toggle_ghost() -> void:
 
 
 func _aim_point() -> Vector3:
+	return _aim_cached
+
+
+## Ray from the camera through the crosshair; also finds the enemy under it
+## (with a small aim-assist cone) for reticle feedback and bullet magnetism.
+func _update_aim() -> void:
 	var from := camera.global_position
-	var to := from - camera.global_basis.z * 400.0
+	var fwd := -camera.global_basis.z
+	var to := from + fwd * 400.0
 	var q := PhysicsRayQueryParameters3D.create(from, to, B.L_WORLD | B.L_ENEMY | B.L_PHASE, [get_rid()])
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
-	return hit["position"] if not hit.is_empty() else to
+	_aim_cached = hit["position"] if not hit.is_empty() else to
+	_aim_target = null
+	if not hit.is_empty() and hit["collider"].is_in_group("enemies"):
+		_aim_target = hit["collider"]
+	elif GameState.settings.get("aim_assist", true):
+		var cone := 0.035 if aiming else 0.06
+		var best := cone
+		for e in get_tree().get_nodes_in_group("enemies"):
+			if not e.is_inside_tree() or (e.has_method("is_alive") and not e.is_alive()):
+				continue
+			var c: Vector3 = e.global_position + Vector3(0, 1.2, 0)
+			var to_e := c - from
+			var d := to_e.length()
+			if d > 160.0 or d < 1.0:
+				continue
+			var ang := fwd.angle_to(to_e)
+			if ang < best:
+				best = ang
+				_aim_target = e
+	aim_on_enemy = _aim_target != null
+	if _aim_target:
+		var tp := _aim_target.global_position + Vector3(0, 1.2, 0)
+		# Only bend the aim if the assisted target isn't behind a wall we hit.
+		if hit.is_empty() or hit["collider"] == _aim_target or from.distance_to(tp) < from.distance_to(hit["position"]):
+			_aim_cached = tp
+		else:
+			_aim_target = null
+			aim_on_enemy = false
 
 
 func _face_camera() -> void:
@@ -388,7 +557,20 @@ func _face_camera() -> void:
 	aim_timer = 0.5
 
 
-func _fire() -> void:
+func _shot_opts(base: Dictionary) -> Dictionary:
+	# Aiming makes shots faster and slightly homing toward the target under the reticle.
+	if aiming:
+		base["speed"] = base["speed"] * 1.3
+		base["damage"] = base["damage"] * 1.15
+	if _aim_target:
+		base["homing"] = _aim_target
+		base["homing_strength"] = 3.0 if aiming else 1.5
+	base["shooter"] = self
+	base["team"] = "player"
+	return base
+
+
+func _fire(w: String) -> void:
 	if phasing:
 		fire_timer = 0.4
 		_toast("You can't attack while intangible. [3] to solidify.", Color(0.8, 1, 0.9))
@@ -398,17 +580,52 @@ func _fire() -> void:
 	_face_camera()
 	var hand: Vector3 = model.hand_position()
 	var dir := (_aim_point() - hand).normalized()
-	if ghost:
-		if energy < 3.0:
-			fire_timer = 0.3
+	match w:
+		"ray":
+			# Fenton Wrist Ray: weaker, but usable without revealing the secret.
+			fire_timer = 0.32
+			Projectile.spawn(get_parent(), hand, dir, _shot_opts({"speed": 60.0, "damage": 6.0, "color": Color(1.0, 0.25, 0.25), "radius": 0.15, "lifetime": 1.6}))
+		"spread":
+			if energy < 8.0:
+				fire_timer = 0.3
+				return
+			energy -= 8.0
+			fire_timer = 0.55
+			var right := dir.cross(Vector3.UP).normalized()
+			var up := right.cross(dir).normalized()
+			for i in 6:
+				var a := i * TAU / 6.0
+				var d := (dir + (right * cos(a) + up * sin(a)) * 0.07).normalized()
+				Projectile.spawn(get_parent(), hand, d, _shot_opts({"speed": 60.0, "damage": 7.0, "color": Color(0.4, 1.0, 0.55), "radius": 0.16, "lifetime": 0.6}))
+			shake = maxf(shake, 0.12)
+		"ice":
+			fire_timer = 0.4
+			_ice()
 			return
-		energy -= 3.0
-		fire_timer = 0.17
-		Projectile.spawn(get_parent(), hand, dir, {"speed": 70.0, "damage": 12.0, "team": "player", "color": Color(0.3, 1.0, 0.45), "radius": 0.22, "shooter": self, "lifetime": 2.5})
-	else:
-		# Fenton Wrist Ray: weaker, but usable without revealing the secret.
-		fire_timer = 0.32
-		Projectile.spawn(get_parent(), hand, dir, {"speed": 60.0, "damage": 6.0, "team": "player", "color": Color(1.0, 0.25, 0.25), "radius": 0.15, "shooter": self, "lifetime": 1.6})
+		_:
+			if energy < 3.0:
+				fire_timer = 0.3
+				return
+			energy -= 3.0
+			fire_timer = 0.15
+			Projectile.spawn(get_parent(), hand, dir, _shot_opts({"speed": 75.0, "damage": 12.0, "color": Color(0.3, 1.0, 0.45), "radius": 0.22, "lifetime": 2.5}))
+	if invisible:
+		set_invisible(false)
+
+
+func _release_charge() -> void:
+	var c := charge
+	charge = 0.0
+	model.charge = 0.0
+	if c < 0.15 or phasing:
+		return
+	var hand: Vector3 = model.hand_position()
+	var dir := (_aim_point() - hand).normalized()
+	Projectile.spawn(get_parent(), hand, dir, _shot_opts({"speed": 55.0 + c * 25.0, "damage": 18.0 + 62.0 * c, "color": Color(0.35, 1.0, 0.55), "radius": 0.3 + 0.45 * c, "lifetime": 3.0, "splash": 3.0 + 5.0 * c}))
+	velocity -= dir * (3.0 + 6.0 * c)
+	shake = maxf(shake, 0.2 + 0.4 * c)
+	fire_timer = 0.3
+	B.burst(get_parent(), hand, Color(0.5, 1.0, 0.7), int(12 + 20 * c), 6.0, 0.2)
 	if invisible:
 		set_invisible(false)
 
@@ -472,7 +689,7 @@ func _ice() -> void:
 	_face_camera()
 	var hand: Vector3 = model.hand_position()
 	var dir := (_aim_point() - hand).normalized()
-	Projectile.spawn(get_parent(), hand, dir, {"speed": 55.0, "damage": 10.0, "team": "player", "effect": "ice", "color": Color(0.6, 0.9, 1.0), "radius": 0.3, "shooter": self, "lifetime": 2.0})
+	Projectile.spawn(get_parent(), hand, dir, _shot_opts({"speed": 55.0, "damage": 10.0, "effect": "ice", "color": Color(0.6, 0.9, 1.0), "radius": 0.3, "lifetime": 2.0}))
 
 
 func _sense() -> void:
@@ -765,31 +982,40 @@ func _update_resources(delta: float) -> void:
 func _process(delta: float) -> void:
 	if cam_pivot == null:
 		return
-	# Camera follow with smoothing; over-the-shoulder when aiming.
+	# Camera follow: tight on the ground, slightly lagging in fast flight so
+	# speed reads on screen; over-the-shoulder zoom while aiming.
 	var target := global_position + Vector3(0, 1.6, 0)
-	var follow := 1.0 - exp(-(18.0 if flying else 14.0) * delta)
-	cam_pivot.global_position = cam_pivot.global_position.lerp(target, follow)
+	var spd := velocity.length()
+	cam_pivot.global_position = target + _cam_lag
 	cam_pivot.rotation.y = _yaw
 	cam_pitch.rotation.x = _pitch
-	var want_len := 5.0
-	var want_x := 0.55
+	# Gentle camera roll with the bank of the turn.
+	cam_pitch.rotation.z = lerpf(cam_pitch.rotation.z, _bank * 0.12 if flying else 0.0, delta * 4.0)
+	var want_len := cam_distance
+	var want_x := 0.55 * shoulder
+	var want_y := 0.0
 	if aiming:
-		want_len = 2.6
-		want_x = 0.9
+		want_len = 2.2 if aim_zoom == 1 else 3.0
+		want_x = 1.05 * shoulder
+		want_y = 0.15
+	elif charge > 0.0:
+		want_len = 3.2
+		want_x = 0.75 * shoulder
 	elif cinematic:
 		want_len = 3.2
 		want_x = 0.0
 	elif flying:
-		want_len = 6.0
-	spring.spring_length = lerpf(spring.spring_length, want_len, delta * 6.0)
-	spring.position.x = lerpf(spring.position.x, want_x, delta * 6.0)
-	var spd := velocity.length()
+		want_len = cam_distance + 0.5 + clampf(spd / BOOST_SPEED, 0.0, 1.0) * 0.6
+	var k := 1.0 - exp(-10.0 * delta)
+	spring.spring_length = lerpf(spring.spring_length, want_len, k)
+	spring.position.x = lerpf(spring.position.x, want_x, k)
+	spring.position.y = lerpf(spring.position.y, want_y, k)
 	var base_fov: float = GameState.settings.get("fov", 75.0)
-	var fov_target := base_fov + clampf((spd - 15.0) / 30.0, 0.0, 1.0) * 20.0
+	var fov_target := base_fov + clampf((spd - 15.0) / 35.0, 0.0, 1.0) * 15.0
 	if aiming:
-		fov_target -= 15.0
-	camera.fov = lerpf(camera.fov, fov_target, delta * 4.0)
-	speed_lines.emitting = flying and spd > 26.0
+		fov_target = base_fov / (2.4 if aim_zoom == 1 else 1.35)
+	camera.fov = lerpf(camera.fov, fov_target, 1.0 - exp(-(10.0 if aiming else 4.0) * delta))
+	speed_lines.emitting = flying and spd > 28.0
 	if shake > 0.0:
 		shake = maxf(0.0, shake - delta * 2.0)
 		camera.h_offset = randf_range(-1, 1) * shake * 0.25
@@ -799,23 +1025,73 @@ func _process(delta: float) -> void:
 		camera.v_offset = 0.0
 
 
+## Keeps the camera locked to the hero in step with physics, plus a small
+## smoothed lag behind fast flight so speed reads on screen.
+func _follow_camera(delta: float) -> void:
+	var lag := Vector3.ZERO
+	if flying and not (aiming or charge > 0.0):
+		lag = -velocity * 0.03
+	_cam_lag = _cam_lag.lerp(lag, 1.0 - exp(-6.0 * delta))
+	cam_pivot.global_position = global_position + Vector3(0, 1.6, 0) + _cam_lag
+
+
+## Called by the game when a ghost appears nearby.
+func ghost_sense_react() -> void:
+	model.sense_reaction()
+	shake = maxf(shake, 0.1)
+
+
 func _update_model(delta: float, move_dir: Vector3) -> void:
 	var spd := velocity.length()
+	var face_cam := aim_timer > 0.0 or aiming or charge > 0.0
+	model.aim_pitch = _pitch
+	model.drive_flight = flying
+	model.boosting = boosting
 	if flying:
-		model.anim_state = "fly" if spd > 4.0 else "hover"
-		model.speed_ratio = clampf(spd / FLY_SPEED, 0.0, 1.0)
-	elif is_on_floor():
-		var hs := Vector2(velocity.x, velocity.z).length()
-		model.anim_state = "run" if hs > 7.5 else ("walk" if hs > 0.6 else "idle")
-		model.speed_ratio = clampf(hs / SPRINT_SPEED, 0.0, 1.0)
+		model.anim_state = "fly" if spd > 5.0 else "hover"
+		model.speed_ratio = clampf(spd / BOOST_SPEED * 1.6, 0.0, 1.0)
+		# Face where we're going at speed, otherwise face the camera so
+		# strafing and back-pedalling read correctly.
+		var hv := Vector2(velocity.x, velocity.z)
+		var face_vel := spd > 10.0 and not face_cam and (velocity.normalized().dot(-_cam_basis().z) > -0.2)
+		var heading := atan2(-velocity.x, -velocity.z) if hv.length() > 1.0 else model.rotation.y
+		var target_yaw := heading if face_vel else _yaw
+		model.rotation.y = lerp_angle(model.rotation.y, target_yaw, clampf(delta * (7.0 if face_vel else 10.0), 0.0, 1.0))
+		# Lean: align the body with the velocity at speed; tilt with input when slow.
+		var local := Basis(Vector3.UP, model.rotation.y).inverse() * velocity
+		var lean: float
+		if face_vel:
+			lean = acos(clampf(velocity.y / maxf(spd, 0.01), -1.0, 1.0))
+			lean = lerpf(clampf(-local.z / 30.0, 0.0, 0.6), minf(lean, 2.7), clampf((spd - 8.0) / 14.0, 0.0, 1.0))
+		else:
+			lean = clampf(-local.z / AIM_FLY_SPEED, -0.6, 1.0) * 0.45 + 0.06
+		# Bank into turns (yaw rate) and strafes.
+		var yaw_rate := angle_difference(_prev_heading, heading) / maxf(delta, 0.001)
+		_prev_heading = heading
+		var bank_target := clampf(-yaw_rate * 0.28, -1.0, 1.0) * clampf(spd / FLY_SPEED, 0.0, 1.0)
+		if not face_vel:
+			bank_target = clampf(-local.x / AIM_FLY_SPEED, -1.0, 1.0) * 0.4
+		_bank = lerpf(_bank, bank_target, clampf(delta * 5.0, 0.0, 1.0))
+		_lean = lerpf(_lean, lean, clampf(delta * 6.0, 0.0, 1.0))
+		model.fly_lean = _lean
+		model.fly_bank = _bank
 	else:
-		model.anim_state = "fall"
-	model.aim_arm = lerpf(model.aim_arm, 1.0 if (aim_timer > 0.0 or aiming) else 0.0, clampf(delta * 12.0, 0.0, 1.0))
-	var face_dir := move_dir
-	if aim_timer > 0.0 or aiming:
-		face_dir = -_cam_basis().z
-	if face_dir.length() > 0.1:
-		var target_yaw := atan2(-face_dir.x, -face_dir.z)
-		model.rotation.y = lerp_angle(model.rotation.y, target_yaw, clampf(delta * 10.0, 0.0, 1.0))
+		_bank = lerpf(_bank, 0.0, clampf(delta * 6.0, 0.0, 1.0))
+		_lean = 0.0
+		if is_on_floor():
+			var hs := Vector2(velocity.x, velocity.z).length()
+			model.anim_state = "run" if hs > 7.5 else ("walk" if hs > 0.6 else "idle")
+			model.speed_ratio = clampf(hs / SPRINT_SPEED, 0.0, 1.0)
+		else:
+			model.anim_state = "fall"
+		var face_dir := move_dir
+		if face_cam:
+			face_dir = -_cam_basis().z
+		if face_dir.length() > 0.1:
+			var target_yaw := atan2(-face_dir.x, -face_dir.z)
+			model.rotation.y = lerp_angle(model.rotation.y, target_yaw, clampf(delta * 10.0, 0.0, 1.0))
+	model.aim_arm = lerpf(model.aim_arm, 1.0 if face_cam else 0.0, clampf(delta * 12.0, 0.0, 1.0))
+	if flying and face_cam:
+		model.rotation.y = lerp_angle(model.rotation.y, _yaw, clampf(delta * 14.0, 0.0, 1.0))
 	if shielded:
 		shield_mesh.rotation.y += delta

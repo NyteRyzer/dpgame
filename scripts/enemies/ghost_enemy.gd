@@ -61,6 +61,12 @@ func _ready() -> void:
 	add_child(visual)
 	_build_visual()
 	_fire_t = randf_range(0.8, fire_rate + 0.5)
+	if flies:
+		# Ghosts pop into existence with a swirl of ectoplasm.
+		visual.scale = Vector3.ONE * 0.05
+		var tw := visual.create_tween()
+		tw.tween_property(visual, "scale", Vector3.ONE, 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		B.burst(get_parent(), global_position + Vector3(0, 1.2 * _scale_base, 0), Color(0.5, 1.0, 0.7), 24, 5.0, 0.22)
 
 
 func _setup_kind() -> void:

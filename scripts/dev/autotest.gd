@@ -176,5 +176,66 @@ func _run() -> void:
 	Input.action_release("move_forward")
 	Input.action_release("sprint")
 	_check("boost flight %.1fm" % fstart.distance_to(p.global_position), fstart.distance_to(p.global_position) > 40.0)
+	# Flight feel: banking into a turn and leaning into fast flight.
+	p._yaw = 0.0
+	Input.action_press("move_forward")
+	Input.action_press("sprint")
+	await _wait(60)
+	_check("boost pose (lean %.2f, boosting %s)" % [p.model.fly_lean, p.boosting], p.boosting and p.model.fly_lean > 1.0)
+	var max_bank := 0.0
+	for i in 40:
+		p._yaw += 0.04
+		await _wait(1)
+		max_bank = maxf(max_bank, absf(p.model.fly_bank))
+	Input.action_release("move_forward")
+	Input.action_release("sprint")
+	_check("banks into turns (%.2f)" % max_bank, max_bank > 0.15)
+
+	# Aiming and zoom.
+	var fov_before: float = p.camera.fov
+	Input.action_press("aim")
+	await _wait(40)
+	var fov_aim: float = p.camera.fov
+	p.aim_zoom = 1
+	await _wait(40)
+	var fov_zoom: float = p.camera.fov
+	Input.action_release("aim")
+	_check("aim zoom FOV %.0f -> %.0f -> %.0f" % [fov_before, fov_aim, fov_zoom], fov_aim < fov_before - 10.0 and fov_zoom < fov_aim - 10.0)
+
+	# Weapon wheel: open, pick the Charged Beam, release.
+	game.hud.wheel.open(p)
+	_check("wheel slows time", Engine.time_scale < 0.5)
+	game.hud.wheel.selected = 1
+	game.hud.wheel.close(true)
+	_check("wheel equips charged beam", p.weapon == "charge" and is_equal_approx(Engine.time_scale, 1.0))
+	var dummy: Node = game.spawn_enemy("minion", p.global_position - p.camera.global_basis.z * 14.0)
+	await _wait(30)
+	p.energy = 100.0
+	Input.action_press("fire")
+	await _wait(80)
+	_check("charge builds (%.2f)" % p.charge, p.charge > 0.9)
+	for i in 10:
+		# Track the target with the camera like a player would.
+		if is_instance_valid(dummy):
+			var d: Vector3 = dummy.global_position + Vector3(0, 1.2, 0) - p.camera.global_position
+			p._yaw = atan2(-d.x, -d.z)
+			p._pitch = asin(clampf(d.normalized().y, -1.0, 1.0))
+		await _wait(1)
+	Input.action_release("fire")
+	await _wait(60)
+	_check("charged blast hits", not is_instance_valid(dummy) or dummy.health < dummy.max_health)
+	game.hud.wheel.open(p)
+	game.hud.wheel.selected = 4
+	game.hud.wheel.close(true)
+	_check("wheel activates shield", p.shielded)
+	p.set_shield(false)
+	p.set_weapon("blast")
+
+	# Ghost sense reacts when a ghost pops up nearby.
+	game._sense_react_cd = 0.0
+	game.hud._sense_t = 0.0
+	game.spawn_enemy("minion", p.global_position + Vector3(20, 2, 0))
+	await _wait(30)
+	_check("ghost sense alert", game.hud._sense_t > 0.0 and p.model._shiver > 0.0)
 	print("AUTOTEST DONE: %d failure(s), level %d, xp %d, rep %d" % [_fails, GameState.level, GameState.xp, GameState.reputation])
 	get_tree().quit(1 if _fails > 0 else 0)

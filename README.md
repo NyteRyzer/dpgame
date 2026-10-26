@@ -48,20 +48,23 @@ in code from primitives, so there are no asset files to import.
 | Mouse / right stick | Camera |
 | Space | Jump. In ghost form it takes off, and holding it climbs. |
 | C or Ctrl | Descend. Touch the ground while descending to land. |
-| Shift | Sprint, or boost while flying |
-| Alt | Aerial dodge (brief invulnerability) |
+| Shift | Sprint, or boost while flying (hold W) |
+| Alt | Dodge. In flight it's a barrel roll with brief invulnerability. |
 | **G** | **GO GHOST / GO HUMAN**. Standing still plays the full cinematic transformation; moving plays a quick one. |
-| Left mouse / 1 | Ecto blast. In human form it fires the Fenton wrist ray. |
-| Right mouse | Aim over the shoulder |
+| Left mouse / 1 | Fire the equipped weapon. In human form it fires the Fenton wrist ray. |
+| Right mouse | Aim over the shoulder: zoomed, slower look, faster shots that home in on the target under the reticle |
+| Mouse wheel | Camera distance. While aiming it switches to the 2.4x precision zoom. |
+| X | Swap aiming shoulder |
+| **Tab (hold)** | **Weapon & power wheel.** Time slows; point and release to pick. |
 | 2 / 3 / 4 | Ghost Shield / Intangibility / Cryokinesis |
 | Q / V | Ghost Sense / Invisibility |
 | Z / T / F / R | Ecto Construct / Overshadow / Duplicate / Ghostly Wail |
 | B | Ghost Tail form (while flying) |
 | E (hold) | Talk, interact, and capture weakened ghosts with the **Fenton Thermos** |
 | M | Map |
-| Esc / Tab | Fenton OS menu |
+| Esc / P | Fenton OS menu |
 
-Gamepads work too: Y transforms, A flies, X interacts, the triggers fire and aim, and the shoulder buttons are shield and phase.
+Gamepads work too: Y transforms, A flies, X interacts, the triggers fire and aim, the shoulder buttons are shield and phase, and Back opens the wheel (right stick picks).
 
 ## What's in this build
 
@@ -85,6 +88,33 @@ Gamepads work too: Y transforms, A flies, X interacts, the triggers fire and aim
   - Traffic that stops for people and panics near fights.
   - Civilians who walk the sidewalks, flee ghosts, and recognise your ghost name and cheer.
   - Casper High runs a school schedule: the bell rings at 8:00 and 15:00, and students gather outside during school hours.
+
+### Flight, aiming and the weapon wheel
+- **Flight** follows the camera: W flies where you look. Movement has momentum and you air-brake into a hover when you let go.
+- **Boost** builds up speed with a shockwave and a camera kick. While boosting you hold the classic fist-forward superhero pose.
+- Your body leans and dives with your velocity and banks into turns, and the camera rolls slightly with the bank. Alt does a barrel-roll dodge.
+- Take-off and landing have squash-and-stretch, and you land automatically when you touch down slowly.
+- **Aiming** zooms over your shoulder and slows the look speed. The mouse wheel switches to a 2.4x precision zoom, and X swaps shoulders. While aiming, flight slows to a strafing hover.
+- **The reticle:**
+  - It turns red over an enemy and widens with speed or the spread weapon.
+  - It shows hit and kill markers.
+  - It shows a charge ring for the Charged Beam.
+- **Aim assist:** your shots curve toward the target under the reticle. You can turn this off in Settings.
+- **Weapon & power wheel (hold Tab):** time slows while it's open.
+  - **Weapons** go on the left mouse button:
+    - **Ecto Blast:** rapid fire.
+    - **Charged Ecto Beam:** hold to charge a glowing orb between your hands, then release for a heavy explosive blast.
+    - **Ecto Spread:** a close-range burst.
+    - **Ice Shot.**
+  - **Powers** fire as soon as you release the key.
+- **Ghost sense:** when a ghost pops up nearby (it materialises with a burst):
+  - Your phantom shivers and a wisp of cold blue breath escapes.
+  - The screen edges frost over.
+  - "~ GHOST SENSE ~" appears and an arrow points toward the ghost.
+
+  It works in both human and ghost form. Q still triggers a manual Ghost Sense scan.
+
+![Weapon wheel](docs/screenshots/weapon_wheel.jpg)
 
 ### The transformation and the full power set
 - Human mode lets you run, jump and talk to people without drawing attention. You can also use the Fenton wrist ray and the Fenton Thermos.

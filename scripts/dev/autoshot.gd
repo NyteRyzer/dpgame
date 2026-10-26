@@ -29,6 +29,7 @@ func _shot(name: String) -> void:
 
 func _run() -> void:
 	var p: Node3D = game.player
+	game.director.set_process(false)
 	await _wait(90)
 	await _shot("01_bedroom")
 	p.teleport(game.amity.spots["lab"] + Vector3(0, 0, 3), 0.0)
@@ -67,6 +68,57 @@ func _run() -> void:
 	await _wait(20)
 	await _shot("07_boss_fight")
 	Input.action_release("fire")
+	for e in get_tree().get_nodes_in_group("enemies"):
+		e.queue_free()
+	p.invuln = 9999.0
+	# New: flight, aiming, charge, weapon wheel and ghost sense.
+	if not p.ghost:
+		p.toggle_ghost()
+		await _wait(100)
+	p.teleport(Vector3(-60, 70, 120), 0.0)
+	p._start_flight()
+	p._yaw = 0.0
+	p._pitch = -0.15
+	Input.action_press("move_forward")
+	Input.action_press("sprint")
+	for i in 70:
+		p._yaw += 0.012
+		await _wait(1)
+	await _shot("13_boost_bank")
+	Input.action_release("sprint")
+	Input.action_release("move_forward")
+	await _wait(40)
+	var t: Node = game.spawn_enemy("minion", p.global_position - p.camera.global_basis.z * 22.0 + Vector3(0, 1, 0))
+	await _wait(40)
+	Input.action_press("aim")
+	for i in 30:
+		var d: Vector3 = t.global_position + Vector3(0, 1.2, 0) - p.camera.global_position
+		p._yaw = atan2(-d.x, -d.z)
+		p._pitch = asin(clampf(d.normalized().y, -1.0, 1.0))
+		await _wait(1)
+	await _shot("14_aim")
+	p.set_weapon("charge")
+	Input.action_press("fire")
+	await _wait(70)
+	await _shot("15_charge")
+	Input.action_release("fire")
+	Input.action_release("aim")
+	await _wait(20)
+	Input.action_press("wheel")
+	await _wait(3)
+	game.hud.wheel._sel = Vector2(150, 40)
+	game.hud.wheel._pick()
+	await _wait(5)
+	await _shot("16_weapon_wheel")
+	game.hud.wheel.close(false)
+	Input.action_release("wheel")
+	game._sense_react_cd = 0.0
+	game.spawn_enemy("minion", p.global_position + Vector3(25, 2, 10))
+	for i in 60:
+		await _wait(1)
+		if game.hud._sense_t > 1.6:
+			break
+	await _shot("17_ghost_sense")
 	p.teleport(Vector3(40, 3, 238), 0.0)
 	p._yaw = 0.0
 	p._pitch = -0.15

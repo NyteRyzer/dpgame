@@ -20,6 +20,19 @@ var ghost := false
 var anim_state := "idle"
 var speed_ratio := 0.0
 var aim_arm := 0.0  # 0..1 blend of the right arm pointing forward
+var aim_pitch := 0.0  # camera pitch, so the arm points where you aim
+var charge := 0.0  # 0..1 charged-blast wind-up (both hands forward)
+## Flight pose driven by the player: lean (0 = upright, PI/2 = horizontal,
+## PI = head-first dive) and bank (roll into turns).
+var drive_flight := false
+var fly_lean := 0.0
+var fly_bank := 0.0
+var boosting := false
+var _spin := 0.0
+var _spin_dir := 1.0
+var _squash := 0.0
+var _shiver := 0.0
+var _charge_orb: MeshInstance3D
 var tail_mode := false
 var transforming := false
 var _look: Dictionary = {}
@@ -145,9 +158,9 @@ func _build() -> void:
 	tail.rotation.x = 0.35
 	tail.visible = false
 
-	aura = B.particles(rig, Color(0.3, 1.0, 0.5), 36, 1.2, false, 0.6, 0.08)
+	aura = B.particles(rig, Color(0.3, 1.0, 0.5), 30, 1.0, false, 0.9, 0.06)
 	aura.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
-	aura.emission_sphere_radius = 0.6
+	aura.emission_sphere_radius = 0.75
 	aura.gravity = Vector3(0, 0.6, 0)
 	aura_light = OmniLight3D.new()
 	aura_light.omni_range = 3.5
@@ -367,6 +380,7 @@ func _process(delta: float) -> void:
 		var c := Color.from_hsv(fmod(_t * 0.25, 1.0), 0.7, 1.0)
 		aura.color_ramp.set_color(0, Color(c, 0.9))
 		aura_light.light_color = c
+	_update_fx(delta)
 	if transforming:
 		_pose(arm_l, Vector3(0, 0, -2.4), delta * 6.0)
 		_pose(arm_r, Vector3(0, 0, 2.4), delta * 6.0)
@@ -386,27 +400,36 @@ func _process(delta: float) -> void:
 			_pose(arm_l, Vector3(-swing * 0.8, 0, -0.08), k)
 			_pose(arm_r, Vector3(swing * 0.8, 0, 0.08), k)
 			rig.position.y = 1.0 + absf(sin(_t * freq)) * 0.05
-			rig.rotation = rig.rotation.lerp(Vector3.ZERO, k)
+			# Lean slightly into a sprint.
+			_rig_toward(Vector3(-0.12 * speed_ratio, 0, 0), k)
 		"fly":
-			# Superhero pose: lean into the direction of travel.
-			var lean := -1.15 * clampf(speed_ratio, 0.0, 1.0)
-			rig.rotation = rig.rotation.lerp(Vector3(lean, 0, 0), delta * 4.0)
-			_pose(leg_l, Vector3(0.15, 0, -0.03), k)
-			_pose(leg_r, Vector3(0.25, 0, 0.03), k)
-			if speed_ratio > 0.75:
-				_pose(arm_r, Vector3(3.0, 0, 0.1), k)
-				_pose(arm_l, Vector3(0.3, 0, -0.2), k)
+			var lean := fly_lean if drive_flight else 1.15 * clampf(speed_ratio, 0.0, 1.0)
+			var bank := fly_bank if drive_flight else 0.0
+			_rig_toward(Vector3(-lean, 0, bank), delta * 6.0)
+			# Legs trail behind with a slow flutter; tighter at speed.
+			var flutter := sin(_t * (5.0 + speed_ratio * 6.0)) * (0.14 - speed_ratio * 0.08)
+			_pose(leg_l, Vector3(0.1 + flutter, 0, -0.02), k)
+			_pose(leg_r, Vector3(0.22 - flutter, 0, 0.02), k)
+			if boosting:
+				# Classic superhero pose: fist forward, other arm swept back.
+				_pose(arm_r, Vector3(3.05, 0, 0.12), k)
+				_pose(arm_l, Vector3(0.15, 0, -0.12), k)
+			elif speed_ratio > 0.45:
+				_pose(arm_l, Vector3(0.25, 0, -0.18), k)
+				_pose(arm_r, Vector3(0.25, 0, 0.18), k)
 			else:
-				_pose(arm_l, Vector3(0.2, 0, -0.35), k)
-				_pose(arm_r, Vector3(0.2, 0, 0.35), k)
-			rig.position.y = 1.0 + sin(_t * 3.0) * 0.04
+				_pose(arm_l, Vector3(0.1, 0, -0.55), k)
+				_pose(arm_r, Vector3(0.1, 0, 0.55), k)
+			rig.position.y = 1.0 + sin(_t * 3.0) * 0.04 * (1.0 - speed_ratio)
 		"hover", "fall":
-			rig.rotation = rig.rotation.lerp(Vector3(-0.08, 0, 0), delta * 4.0)
 			var bob := sin(_t * 2.2)
-			_pose(leg_l, Vector3(0.12 + bob * 0.08, 0, -0.05), k)
-			_pose(leg_r, Vector3(-0.05 - bob * 0.08, 0, 0.05), k)
-			_pose(arm_l, Vector3(0.1, 0, -0.4 - bob * 0.05), k)
-			_pose(arm_r, Vector3(0.1, 0, 0.4 + bob * 0.05), k)
+			var lean := fly_lean if drive_flight else 0.08
+			var bank := fly_bank if drive_flight else 0.0
+			_rig_toward(Vector3(-lean, 0, bank), delta * 5.0)
+			_pose(leg_l, Vector3(0.18 + bob * 0.1, 0, -0.06), k)
+			_pose(leg_r, Vector3(-0.04 - bob * 0.1, 0, 0.06), k)
+			_pose(arm_l, Vector3(0.1, 0, -0.45 - bob * 0.06), k)
+			_pose(arm_r, Vector3(0.1, 0, 0.45 + bob * 0.06), k)
 			rig.position.y = 1.0 + bob * 0.07
 		_:
 			var breathe := sin(_t * 2.0) * 0.03
@@ -415,9 +438,75 @@ func _process(delta: float) -> void:
 			_pose(arm_l, Vector3(0, 0, -0.1 - breathe), k)
 			_pose(arm_r, Vector3(0, 0, 0.1 + breathe), k)
 			rig.position.y = 1.0
-			rig.rotation = rig.rotation.lerp(Vector3.ZERO, k)
-	if aim_arm > 0.01:
-		arm_r.rotation = arm_r.rotation.lerp(Vector3(PI / 2, 0, 0), aim_arm)
+			_rig_toward(Vector3.ZERO, k)
+	if charge > 0.01:
+		# Both hands forward, cupping a growing ball of ectoplasm.
+		var up := PI / 2 + clampf(aim_pitch, -1.0, 1.0)
+		_pose(arm_r, Vector3(up, 0, -0.35), delta * 14.0)
+		_pose(arm_l, Vector3(up, 0, 0.35), delta * 14.0)
+	elif aim_arm > 0.01:
+		var up := PI / 2 + clampf(aim_pitch, -1.1, 1.1)
+		arm_r.rotation = arm_r.rotation.lerp(Vector3(up, 0, 0), aim_arm)
+
+
+func _rig_toward(target: Vector3, w: float) -> void:
+	var r := rig.rotation.lerp(target, clampf(w, 0.0, 1.0))
+	if _shiver > 0.0:
+		r += Vector3(randf_range(-1, 1) * 0.02, 0, randf_range(-1, 1) * 0.05) * _shiver
+	rig.rotation = r
+
+
+func _update_fx(delta: float) -> void:
+	# Dodge barrel roll spins the body around its own long axis.
+	if _spin > 0.0:
+		_spin = maxf(0.0, _spin - delta / 0.38)
+		body.rotation.y = (1.0 - _spin) * TAU * _spin_dir
+	else:
+		body.rotation.y = 0.0
+	# Take-off / landing squash and stretch.
+	if absf(_squash) > 0.001:
+		_squash = lerpf(_squash, 0.0, clampf(delta * 9.0, 0.0, 1.0))
+		rig.scale = Vector3(1.0 + _squash * 0.5, 1.0 - _squash, 1.0 + _squash * 0.5)
+	else:
+		rig.scale = Vector3.ONE
+	_shiver = maxf(0.0, _shiver - delta)
+	# Charge orb.
+	if charge > 0.01:
+		if _charge_orb == null:
+			_charge_orb = B.sphere(body, 0.5, Vector3(0, 1.25, -0.62), B.glow(Color(0.4, 1.0, 0.6), 4.0, 0.85), 0, 14) as MeshInstance3D
+		_charge_orb.visible = true
+		var s := 0.15 + charge * 0.75 + sin(_t * 30.0) * 0.04 * charge
+		_charge_orb.scale = Vector3.ONE * s
+	elif _charge_orb:
+		_charge_orb.visible = false
+
+
+func barrel_roll(direction := 1.0) -> void:
+	_spin = 1.0
+	_spin_dir = signf(direction) if direction != 0.0 else 1.0
+
+
+func land_impact(strength := 1.0) -> void:
+	_squash = 0.22 * clampf(strength, 0.2, 1.5)
+
+
+func takeoff() -> void:
+	_squash = -0.18
+
+
+## Danny's ghost sense: a shiver and a wisp of cold blue breath.
+func sense_reaction() -> void:
+	_shiver = 1.1
+	for i in 2:
+		var wisp := B.particles(body, Color(0.62, 0.86, 1.0), 26, 1.5, true, 0.9 + i * 0.4, 0.13 - i * 0.03)
+		wisp.explosiveness = 0.15
+		wisp.position = Vector3(0, 1.57, -0.2)
+		wisp.direction = Vector3(0.15 * (i * 2 - 1), 0.45, -1)
+		wisp.spread = 14.0
+		wisp.gravity = Vector3(0, 1.1, 0)
+		wisp.damping_min = 0.6
+		wisp.damping_max = 1.2
+		wisp.local_coords = false
 
 
 func _pose(n: Node3D, target: Vector3, w: float) -> void:
@@ -425,4 +514,6 @@ func _pose(n: Node3D, target: Vector3, w: float) -> void:
 
 
 func hand_position() -> Vector3:
+	if charge > 0.01 and _charge_orb:
+		return _charge_orb.global_position
 	return arm_r.to_global(Vector3(0, -0.6, 0))

@@ -273,7 +273,9 @@ static func particles(parent: Node, color: Color, amount := 24, lifetime := 0.8,
 	p.color_ramp = ramp
 	parent.add_child(p)
 	if one_shot:
-		p.emitting = true
+		# Start at the end of the frame, once the caller has positioned it.
+		p.emitting = false
+		p.call_deferred("restart")
 		p.finished.connect(p.queue_free)
 	return p
 
@@ -286,6 +288,8 @@ static func _particle_mat(color: Color) -> StandardMaterial3D:
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.vertex_color_use_as_albedo = true
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	m.no_depth_test = false
 	m.albedo_color = Color(1, 1, 1, 0.85)
 	m.emission_enabled = true
 	m.emission = color

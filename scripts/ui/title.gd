@@ -20,6 +20,7 @@ var _t := 0.0
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	Engine.time_scale = 1.0
 	get_tree().paused = false
 	theme = UI.make_theme()
 	var bg := ColorRect.new()
@@ -152,7 +153,7 @@ func _ready() -> void:
 	var cv := VBoxContainer.new()
 	_controls.add_child(cv)
 	cv.add_child(UI.label("CONTROLS", 26, UI.GREEN))
-	for line in ["WASD - move    Mouse - camera", "Space - jump / fly / ascend    C - descend", "Shift - sprint / boost    Alt - dodge", "G - GO GHOST", "LMB/1 blast   RMB aim   2 shield   3 phase   4 ice", "Q sense   V invisibility   Z ecto construct", "T overshadow   F duplicate   R Ghostly Wail   B ghost tail", "E (hold) - talk, interact, Fenton Thermos capture", "M - map    Esc/Tab - Fenton OS menu", "", "Gamepad supported (Y = transform, A = fly, X = interact)"]:
+	for line in ["WASD - move    Mouse - camera", "Space - jump / fly / ascend    C - descend", "Shift - sprint / boost    Alt - dodge roll", "G - GO GHOST", "LMB fire   RMB aim (wheel = zoom, X = swap shoulder)", "Tab (hold) - weapon & power wheel", "2 shield   3 phase   4 ice", "Q sense   V invisibility   Z ecto construct", "T overshadow   F duplicate   R Ghostly Wail   B ghost tail", "E (hold) - talk, interact, Fenton Thermos capture", "M - map    Esc/P - Fenton OS menu", "", "Gamepad: Y transform, A fly, X interact, Back = wheel"]:
 		cv.add_child(UI.label(line, 17))
 	_controls.visible = false
 	add_child(_controls)
